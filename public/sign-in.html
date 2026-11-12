@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f8f7f2">
+    <meta name="description" content="Sign in or create a Goodroot account to manage your fundraisers.">
+    <title>Your Goodroot space — Goodroot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css?v=4">
+    <script src="/pages.js?v=6" defer></script>
+  </head>
+  <body data-page="signin">
+    <div class="announcement"><span class="announcement-dot" aria-hidden="true"></span> Good grows when we grow it together.</div>
+    <header class="site-header">
+      <a class="brand" href="index.html" aria-label="Goodroot home"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span><span>goodroot</span></a>
+      <nav class="main-nav" aria-label="Main navigation"><a class="nav-link" href="explore.html">Explore fundraisers</a><a class="nav-link" href="how-it-works.html">How it works</a></nav>
+      <div class="header-actions"><a class="text-button" href="dashboard.html">My fundraisers</a><a class="button button-dark header-cta" href="start.html">Start a fundraiser <span aria-hidden="true">↗</span></a></div>
+      <button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false"><span></span><span></span></button>
+    </header>
+    <main class="subpage-shell sign-in-page">
+      <div class="sign-in-card">
+        <div class="sign-in-mark" aria-hidden="true">✳</div>
+        <div class="section-kicker">WELCOME TO GOODROOT</div>
+        <h1 class="page-title" id="auth-title">Good to have <em>you here.</em></h1>
+        <p class="page-lead" id="auth-description">Sign in to manage your fundraisers and payment account.</p>
+        <div class="auth-tabs" role="tablist" aria-label="Account options"><button type="button" class="auth-tab active" role="tab" aria-selected="true" data-auth-mode="login">Sign in</button><button type="button" class="auth-tab" role="tab" aria-selected="false" data-auth-mode="register">Create account</button></div>
+        <form class="auth-form" id="login-form">
+          <div class="form-field"><label for="login-email">Email address</label><input id="login-email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+          <div class="form-field"><label for="login-password">Password</label><input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="128" required></div>
+          <button class="button button-dark sign-in-main-action" type="submit">Sign in <span aria-hidden="true">→</span></button>
+        </form>
+        <form class="auth-form" id="register-form" hidden>
+          <div class="form-field"><label for="register-name">Your name</label><input id="register-name" name="name" autocomplete="name" maxlength="60" required></div>
+          <div class="form-field"><label for="register-email">Email address</label><input id="register-email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+          <div class="form-field"><label for="register-password">Password</label><input id="register-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><span class="form-hint">Use at least 12 characters.</span></div>
+          <button class="button button-dark sign-in-main-action" type="submit">Create account <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="auth-message" id="auth-message" role="status" aria-live="polite"></p>
+        <p class="modal-footnote">Accounts are stored securely by Goodroot. Email verification and password recovery are not available in this release.</p>
+      </div>
+    </main>
+    <footer class="site-footer"><a class="brand footer-brand" href="index.html"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span><span>goodroot</span></a><p>Good grows when we grow it together.</p><span class="footer-copyright">© <span class="current-year"></span> Goodroot · Made for good things.</span></footer>
+    <div class="toast" id="page-toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

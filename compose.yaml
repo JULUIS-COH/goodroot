@@ -1,0 +1,29 @@
+services:
+  app:
+    build:
+      context: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 4173
+      DATABASE_PATH: /data/goodroot.sqlite
+      UPLOADS_DIRECTORY: /data/uploads
+    ports:
+      - "127.0.0.1:4173:4173"
+    volumes:
+      - goodroot-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  goodroot-data:

@@ -1,0 +1,4 @@
+ALTER TABLE campaigns ADD COLUMN beneficiary_type TEXT NOT NULL DEFAULT 'self';
+ALTER TABLE campaigns ADD COLUMN beneficiary_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE campaigns ADD COLUMN thank_you_note TEXT NOT NULL DEFAULT '';
+ALTER TABLE campaigns ADD COLUMN draft INTEGER NOT NULL DEFAULT 0;
