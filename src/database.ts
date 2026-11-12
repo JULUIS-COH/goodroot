@@ -13,18 +13,19 @@ const appliedMigrations = new Set(
   (database.prepare("SELECT id FROM schema_migrations").all() as { id: string }[]).map((row) => row.id),
 );
 const migrationDirectory = resolve(process.cwd(), "src/migrations");
-for (const migrationName of ["001_core.sql", "002_campaign_creation.sql"]) {
+for (const migrationName of ["001_core.sql", "002_campaign_creation.sql", "003_account_security.sql"]) {
   if (appliedMigrations.has(migrationName)) continue;
   const migration = readFileSync(resolve(migrationDirectory, migrationName), "utf8");
   database.exec("BEGIN IMMEDIATE");
   try {
-    if (migrationName === "002_campaign_creation.sql") {
-      const campaignColumns = new Set(
-        (database.prepare("PRAGMA table_info(campaigns)").all() as { name: string }[]).map((column) => column.name),
+    if (migrationName === "002_campaign_creation.sql" || migrationName === "003_account_security.sql") {
+      const tableName = migrationName === "002_campaign_creation.sql" ? "campaigns" : "users";
+      const tableColumns = new Set(
+        (database.prepare(`PRAGMA table_info(${tableName})`).all() as { name: string }[]).map((column) => column.name),
       );
       for (const statement of migration.split(";").map((part) => part.trim()).filter(Boolean)) {
-        const column = statement.match(/ALTER TABLE campaigns ADD COLUMN (\w+)/)?.[1];
-        if (!column || !campaignColumns.has(column)) database.exec(statement);
+        const alter = statement.match(/ALTER TABLE (\w+) ADD COLUMN (\w+)/);
+        if (!alter || !tableColumns.has(alter[2]!)) database.exec(statement);
       }
     } else {
       database.exec(migration);

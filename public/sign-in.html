@@ -9,8 +9,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/styles.css?v=4">
-    <script src="/pages.js?v=6" defer></script>
+    <link rel="stylesheet" href="/styles.css?v=5">
+    <script src="/pages.js?v=8" defer></script>
   </head>
   <body data-page="signin">
     <div class="announcement"><span class="announcement-dot" aria-hidden="true"></span> Good grows when we grow it together.</div>
@@ -38,8 +38,33 @@
           <div class="form-field"><label for="register-password">Password</label><input id="register-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><span class="form-hint">Use at least 12 characters.</span></div>
           <button class="button button-dark sign-in-main-action" type="submit">Create account <span aria-hidden="true">→</span></button>
         </form>
+        <div class="auth-links" id="auth-links">
+          <a href="#forgot-password" data-auth-view="forgot">Forgot your password?</a>
+          <a href="#verify-email" data-auth-view="verify">Resend verification email</a>
+        </div>
+        <form class="auth-form" id="forgot-form" hidden>
+          <div class="form-field"><label for="forgot-email">Email address</label><input id="forgot-email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+          <button class="button button-dark sign-in-main-action" type="submit">Send reset link</button>
+          <button class="auth-back-link" type="button" data-auth-view="login">Back to sign in</button>
+        </form>
+        <form class="auth-form" id="resend-verification-form" hidden>
+          <div class="form-field"><label for="verification-email">Email address</label><input id="verification-email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+          <button class="button button-dark sign-in-main-action" type="submit">Send verification link</button>
+          <button class="auth-back-link" type="button" data-auth-view="login">Back to sign in</button>
+        </form>
+        <form class="auth-form" id="verify-link-form" hidden>
+          <input id="verification-token" name="token" type="hidden">
+          <button class="button button-dark sign-in-main-action" type="submit">Verify email address</button>
+          <button class="auth-back-link" type="button" data-auth-view="login">Back to sign in</button>
+        </form>
+        <form class="auth-form" id="reset-password-form" hidden>
+          <input id="reset-token" name="token" type="hidden">
+          <div class="form-field"><label for="reset-password">New password</label><input id="reset-password" name="password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><span class="form-hint">Use at least 12 characters.</span></div>
+          <button class="button button-dark sign-in-main-action" type="submit">Save new password</button>
+          <button class="auth-back-link" type="button" data-auth-view="login">Back to sign in</button>
+        </form>
         <p class="auth-message" id="auth-message" role="status" aria-live="polite"></p>
-        <p class="modal-footnote">Accounts are stored securely by Goodroot. Email verification and password recovery are not available in this release.</p>
+        <p class="modal-footnote">Verify your email address to activate your account. Password reset links expire after one hour.</p>
       </div>
     </main>
     <footer class="site-footer"><a class="brand footer-brand" href="index.html"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span><span>goodroot</span></a><p>Good grows when we grow it together.</p><span class="footer-copyright">© <span class="current-year"></span> Goodroot · Made for good things.</span></footer>

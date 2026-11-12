@@ -19,6 +19,8 @@ const appUrl = new URL(process.env.APP_URL ?? `http://localhost:${port}`);
 const sessionSecret = process.env.SESSION_SECRET ?? "";
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY ?? "";
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? "";
+const resendApiKey = process.env.RESEND_API_KEY ?? "";
+const emailFrom = process.env.EMAIL_FROM ?? "";
 const isProduction = process.env.NODE_ENV === "production";
 const stripe = stripeSecretKey ? new Stripe(stripeSecretKey) : undefined;
 const allowedCategories = new Set(["Community", "Medical", "Education", "Animals", "Environment"]);
@@ -50,6 +52,12 @@ if (stripeSecretKey.startsWith("sk_live_")) {
 if (stripeSecretKey && !stripeWebhookSecret) {
   throw new Error("STRIPE_WEBHOOK_SECRET is required when Stripe test mode is configured.");
 }
+if (Boolean(resendApiKey) !== Boolean(emailFrom)) {
+  throw new Error("RESEND_API_KEY and EMAIL_FROM must be configured together.");
+}
+if (isProduction && (!resendApiKey || !emailFrom)) {
+  throw new Error("RESEND_API_KEY and EMAIL_FROM are required in production for account verification and recovery.");
+}
 
 interface UserRow {
   id: string;
@@ -57,9 +65,12 @@ interface UserRow {
   name: string;
   password_salt: string;
   password_hash: string;
+  email_verified: number;
   stripe_account_id: string | null;
   created_at: string;
 }
+
+type AuthTokenPurpose = "verify_email" | "password_reset";
 
 interface CampaignRow {
   id: string;
@@ -143,6 +154,7 @@ function resolveSession(request: IncomingMessage): UserRow | undefined {
   if (!token || token.length > 200) return undefined;
   const row = database.prepare(`
     SELECT users.id, users.email, users.name, users.password_salt, users.password_hash,
+           users.email_verified,
            users.stripe_account_id, users.created_at
     FROM sessions
     JOIN users ON users.id = sessions.user_id
@@ -165,8 +177,79 @@ function publicUser(user: UserRow): Record<string, unknown> {
     id: user.id,
     email: user.email,
     name: user.name,
+    emailVerified: Boolean(user.email_verified),
     hasPayoutAccount: Boolean(user.stripe_account_id),
   };
+}
+
+function createAuthToken(userId: string, purpose: AuthTokenPurpose, expiresInMs: number): string {
+  const token = randomBytes(32).toString("base64url");
+  const now = new Date();
+  database.prepare("DELETE FROM auth_tokens WHERE user_id = ? AND purpose = ?").run(userId, purpose);
+  database.prepare(`
+    INSERT INTO auth_tokens (token_hash, user_id, purpose, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(sha256(token), userId, purpose, new Date(now.getTime() + expiresInMs).toISOString(), now.toISOString());
+  database.prepare("DELETE FROM auth_tokens WHERE expires_at <= ?").run(now.toISOString());
+  return token;
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character]!);
+}
+
+async function sendAccountEmail(to: string, subject: string, text: string, html: string, purpose: string): Promise<void> {
+  if (!resendApiKey || !emailFrom) {
+    if (isProduction) throw new Error("Account email delivery is not configured.");
+    console.info(`Development ${purpose} link: ${text.match(/https?:\/\/\S+/)?.[0] ?? "(link unavailable)"}`);
+    return;
+  }
+  const result = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${resendApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ from: emailFrom, to: [to], subject, text, html }),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!result.ok) {
+    const responseText = await result.text();
+    console.error("Resend rejected an account email.", { status: result.status, response: responseText.slice(0, 500) });
+    throw new Error("The account email could not be delivered. Check the email provider configuration.");
+  }
+}
+
+async function sendVerificationEmail(user: Pick<UserRow, "id" | "email" | "name">): Promise<void> {
+  const token = createAuthToken(user.id, "verify_email", 24 * 60 * 60 * 1000);
+  const verificationUrl = new URL(`/sign-in.html?verify=${encodeURIComponent(token)}`, appUrl).toString();
+  const name = escapeHtml(user.name);
+  await sendAccountEmail(
+    user.email,
+    "Verify your Goodroot email",
+    `Hi ${user.name},\n\nVerify your email address to activate your Goodroot account:\n${verificationUrl}\n\nThis link expires in 24 hours. If you did not create this account, you can ignore this message.`,
+    `<p>Hi ${name},</p><p>Verify your email address to activate your Goodroot account.</p><p><a href="${escapeHtml(verificationUrl)}">Verify my email</a></p><p>This link expires in 24 hours. If you did not create this account, you can ignore this message.</p>`,
+    "verify_email",
+  );
+}
+
+async function sendPasswordResetEmail(user: Pick<UserRow, "id" | "email" | "name">): Promise<void> {
+  const token = createAuthToken(user.id, "password_reset", 60 * 60 * 1000);
+  const resetUrl = new URL(`/sign-in.html?reset=${encodeURIComponent(token)}`, appUrl).toString();
+  const name = escapeHtml(user.name);
+  await sendAccountEmail(
+    user.email,
+    "Reset your Goodroot password",
+    `Hi ${user.name},\n\nChoose a new password for your Goodroot account:\n${resetUrl}\n\nThis link expires in one hour. If you did not request a reset, you can ignore this message.`,
+    `<p>Hi ${name},</p><p>Use the secure link below to choose a new Goodroot password.</p><p><a href="${escapeHtml(resetUrl)}">Reset my password</a></p><p>This link expires in one hour. If you did not request a reset, you can ignore this message.</p>`,
+    "password_reset",
+  );
 }
 
 function requireUser(request: IncomingMessage, response: ServerResponse): UserRow | undefined {
@@ -486,6 +569,135 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     return;
   }
 
+  if (pathname === "/api/auth/verify" && method === "POST") {
+    if (!takeRateLimit(request, "auth:verify-email", 20, 15 * 60 * 1000)) {
+      json(response, 429, { error: "Too many verification attempts. Please wait and try again." });
+      return;
+    }
+    const body = await readJson(request);
+    const token = requiredString(body.token, 20, 200);
+    if (!token) {
+      json(response, 400, { error: "This verification link is invalid or has expired." });
+      return;
+    }
+    const now = new Date().toISOString();
+    const authToken = database.prepare(`
+      SELECT user_id FROM auth_tokens
+      WHERE token_hash = ? AND purpose = 'verify_email' AND expires_at > ?
+    `).get(sha256(token), now) as { user_id: string } | undefined;
+    if (!authToken) {
+      json(response, 400, { error: "This verification link is invalid or has expired." });
+      return;
+    }
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const consumed = database.prepare(`
+        DELETE FROM auth_tokens
+        WHERE token_hash = ? AND user_id = ? AND purpose = 'verify_email' AND expires_at > ?
+      `).run(sha256(token), authToken.user_id, now);
+      if (consumed.changes !== 1) {
+        database.exec("ROLLBACK");
+        json(response, 400, { error: "This verification link is invalid or has expired." });
+        return;
+      }
+      database.prepare("UPDATE users SET email_verified = 1 WHERE id = ?").run(authToken.user_id);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    json(response, 200, { message: "Your email is verified. You can now sign in." });
+    return;
+  }
+
+  if (pathname === "/api/auth/verification-email" && method === "POST") {
+    if (!takeRateLimit(request, "auth:resend-verification", 5, 15 * 60 * 1000)) {
+      json(response, 429, { error: "Too many requests. Please wait before trying again." });
+      return;
+    }
+    const body = await readJson(request);
+    const email = requiredString(body.email, 5, 254)?.toLocaleLowerCase("en-US");
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      json(response, 400, { error: "Enter a valid email address." });
+      return;
+    }
+    const user = database.prepare("SELECT id, email, name, email_verified FROM users WHERE email = ?")
+      .get(email) as (Pick<UserRow, "id" | "email" | "name"> & { email_verified: number }) | undefined;
+    if (user && !user.email_verified) await sendVerificationEmail(user);
+    json(response, 202, { message: "If your account needs verification, we’ll email you a new link." });
+    return;
+  }
+
+  if (pathname === "/api/auth/password-reset" && method === "POST") {
+    if (!takeRateLimit(request, "auth:password-reset", 5, 15 * 60 * 1000)) {
+      json(response, 429, { error: "Too many requests. Please wait before trying again." });
+      return;
+    }
+    const body = await readJson(request);
+    const email = requiredString(body.email, 5, 254)?.toLocaleLowerCase("en-US");
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      json(response, 400, { error: "Enter a valid email address." });
+      return;
+    }
+    const user = database.prepare("SELECT id, email, name, email_verified FROM users WHERE email = ?")
+      .get(email) as (Pick<UserRow, "id" | "email" | "name"> & { email_verified: number }) | undefined;
+    if (user?.email_verified) await sendPasswordResetEmail(user);
+    json(response, 202, { message: "If an account uses that email, we’ll send password reset instructions." });
+    return;
+  }
+
+  if (pathname === "/api/auth/password-reset/confirm" && method === "POST") {
+    if (!takeRateLimit(request, "auth:password-reset-confirm", 10, 15 * 60 * 1000)) {
+      json(response, 429, { error: "Too many attempts. Please wait and try again." });
+      return;
+    }
+    const body = await readJson(request);
+    const token = requiredString(body.token, 20, 200);
+    const password = typeof body.password === "string" ? body.password : "";
+    if (!token) {
+      json(response, 400, { error: "This password reset link is invalid or has expired." });
+      return;
+    }
+    if (password.length < 12 || password.length > 128) {
+      json(response, 400, { error: "Use a password between 12 and 128 characters." });
+      return;
+    }
+    const now = new Date().toISOString();
+    const authToken = database.prepare(`
+      SELECT user_id FROM auth_tokens
+      WHERE token_hash = ? AND purpose = 'password_reset' AND expires_at > ?
+    `).get(sha256(token), now) as { user_id: string } | undefined;
+    if (!authToken) {
+      json(response, 400, { error: "This password reset link is invalid or has expired." });
+      return;
+    }
+    const salt = randomBytes(16).toString("hex");
+    const passwordHash = await derivePassword(password, salt);
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      const consumed = database.prepare(`
+        DELETE FROM auth_tokens
+        WHERE token_hash = ? AND user_id = ? AND purpose = 'password_reset' AND expires_at > ?
+      `).run(sha256(token), authToken.user_id, now);
+      if (consumed.changes !== 1) {
+        database.exec("ROLLBACK");
+        json(response, 400, { error: "This password reset link is invalid or has expired." });
+        return;
+      }
+      database.prepare("UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?")
+        .run(salt, passwordHash.toString("hex"), authToken.user_id);
+      database.prepare("DELETE FROM auth_tokens WHERE user_id = ? AND purpose = 'password_reset'").run(authToken.user_id);
+      database.prepare("DELETE FROM sessions WHERE user_id = ?").run(authToken.user_id);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    clearSessionCookie(response);
+    json(response, 200, { message: "Your password has been updated. Sign in with your new password." });
+    return;
+  }
+
   if ((pathname === "/api/auth/register" || pathname === "/api/auth/login") && method === "POST") {
     const operation = pathname.endsWith("register") ? "register" : "login";
     if (!takeRateLimit(request, `auth:${operation}`, 10, 15 * 60 * 1000)) {
@@ -509,8 +721,10 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
       const passwordHash = await derivePassword(password, salt);
       const id = randomUUID();
       try {
-        database.prepare("INSERT INTO users (id, email, name, password_salt, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-          .run(id, email, name, salt, passwordHash.toString("hex"), new Date().toISOString());
+        database.prepare(`
+          INSERT INTO users (id, email, name, password_salt, password_hash, email_verified, created_at)
+          VALUES (?, ?, ?, ?, ?, 0, ?)
+        `).run(id, email, name, salt, passwordHash.toString("hex"), new Date().toISOString());
       } catch (error) {
         if (error instanceof Error && error.message.includes("UNIQUE constraint failed: users.email")) {
           json(response, 409, { error: "An account with this email already exists." });
@@ -518,8 +732,8 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
         }
         throw error;
       }
-      await createSession(response, id);
-      json(response, 201, { user: { id, email, name, hasPayoutAccount: false } });
+      await sendVerificationEmail({ id, email, name });
+      json(response, 201, { message: "Check your email for a link to verify your account." });
       return;
     }
     if (password.length === 0 || password.length > 128) {
@@ -536,6 +750,10 @@ async function handleApi(request: IncomingMessage, response: ServerResponse, url
     const expected = Buffer.from(user.password_hash, "hex");
     if (candidate.length !== expected.length || !timingSafeEqual(candidate, expected)) {
       json(response, 401, { error: "Email or password is incorrect." });
+      return;
+    }
+    if (!user.email_verified) {
+      json(response, 403, { error: "Verify your email before signing in. You can request a new verification link below." });
       return;
     }
     await createSession(response, user.id);

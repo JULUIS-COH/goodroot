@@ -375,6 +375,10 @@ h1 span { color: #739454; font-family: var(--serif); font-size: 1.04em; font-wei
 .campaign-update-entry h3 { display: inline-block; margin: 0 12px 0 0; color: #384739; font-family: var(--display); font-size: 14px; }
 .campaign-update-entry time { color: #939a90; font-size: 9px; }
 .campaign-update-entry p { margin: 8px 0 0; color: #707970; font-size: 11px; line-height: 1.75; white-space: pre-line; }
+.auth-links { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 11px 20px; margin-top: 15px; }
+.auth-links a, .auth-back-link { color: var(--forest); font-size: 11px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.auth-back-link { display: inline-flex; margin-top: 14px; padding: 5px 0; border: 0; background: transparent; cursor: pointer; }
+.auth-form[hidden], .auth-tabs[hidden], .auth-links[hidden] { display: none; }
 
 @media (max-width: 760px) {
   .subpage-shell { width: 88%; padding: 48px 0 62px; }

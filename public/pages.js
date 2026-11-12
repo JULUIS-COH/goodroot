@@ -271,25 +271,64 @@ function safeReturnPath() {
 async function renderAuth() {
   const loginForm = document.querySelector("#login-form");
   const registerForm = document.querySelector("#register-form");
+  const authTabs = document.querySelector(".auth-tabs");
+  const authLinks = document.querySelector("#auth-links");
+  const forgotForm = document.querySelector("#forgot-form");
+  const resendVerificationForm = document.querySelector("#resend-verification-form");
+  const verifyLinkForm = document.querySelector("#verify-link-form");
+  const resetPasswordForm = document.querySelector("#reset-password-form");
   const message = document.querySelector("#auth-message");
   const title = document.querySelector("#auth-title");
   const description = document.querySelector("#auth-description");
-  const switchMode = (mode) => {
-    const registering = mode === "register";
-    loginForm.hidden = registering;
-    registerForm.hidden = !registering;
-    title.innerHTML = registering ? "Start your <em>Goodroot account.</em>" : "Good to have <em>you here.</em>";
-    description.textContent = registering ? "Create an account to start and manage fundraisers." : "Sign in to manage your fundraisers and payment account.";
-    message.textContent = "";
+  const query = new URLSearchParams(location.search);
+  const views = {
+    login: { title: "Good to have <em>you here.</em>", description: "Sign in to manage your fundraisers and payment account." },
+    register: { title: "Start your <em>Goodroot account.</em>", description: "Create an account to start and manage fundraisers." },
+    forgot: { title: "A fresh start, <em>one link away.</em>", description: "Enter your email and we’ll send password reset instructions if an account matches." },
+    verify: { title: "Check your <em>email.</em>", description: "Enter the address you registered with and we’ll send a new verification link if needed." },
+    "confirm-verify": { title: "Verify your <em>email.</em>", description: "Confirm your email address to activate your Goodroot account." },
+    reset: { title: "Choose a new <em>password.</em>", description: "Use a strong password you have not used for this account before." },
+  };
+  const showView = (view) => {
+    const config = views[view] || views.login;
+    loginForm.hidden = view !== "login";
+    registerForm.hidden = view !== "register";
+    forgotForm.hidden = view !== "forgot";
+    resendVerificationForm.hidden = view !== "verify";
+    verifyLinkForm.hidden = view !== "confirm-verify";
+    resetPasswordForm.hidden = view !== "reset";
+    authTabs.hidden = view !== "login" && view !== "register";
+    authLinks.hidden = view !== "login";
+    title.innerHTML = config.title;
+    description.textContent = config.description;
     document.querySelectorAll("[data-auth-mode]").forEach((button) => {
-      const selected = button.dataset.authMode === mode;
+      const selected = button.dataset.authMode === view;
       button.classList.toggle("active", selected);
       button.setAttribute("aria-selected", String(selected));
     });
+    if (view === "forgot") document.querySelector("#forgot-email").value = loginForm.elements.email.value;
+    if (view === "verify") document.querySelector("#verification-email").value = loginForm.elements.email.value;
+  };
+  const switchMode = (mode) => {
+    showView(mode);
+    message.textContent = "";
   };
   document.querySelectorAll("[data-auth-mode]").forEach((button) => button.addEventListener("click", () => switchMode(button.dataset.authMode)));
+  document.querySelectorAll("[data-auth-view]").forEach((button) => button.addEventListener("click", (event) => {
+    event.preventDefault();
+    showView(button.dataset.authView);
+    message.textContent = "";
+  }));
+  if (query.has("reset")) {
+    document.querySelector("#reset-token").value = query.get("reset");
+    showView("reset");
+  }
+  if (query.has("verify")) {
+    document.querySelector("#verification-token").value = query.get("verify");
+    showView("confirm-verify");
+  }
   const existing = await api("/api/auth/me");
-  if (existing.user) {
+  if (existing.user && !query.has("reset") && !query.has("verify")) {
     location.replace(safeReturnPath());
     return;
   }
@@ -303,8 +342,45 @@ async function renderAuth() {
       try {
         const data = new FormData(form);
         const fields = Object.fromEntries(data.entries());
-        await api(endpoint, { method: "POST", body: JSON.stringify(fields) });
-        location.assign(safeReturnPath());
+        const result = await api(endpoint, { method: "POST", body: JSON.stringify(fields) });
+        if (endpoint.endsWith("register")) {
+          showView("verify");
+          document.querySelector("#verification-email").value = fields.email;
+          message.textContent = result.message;
+        } else {
+          location.assign(safeReturnPath());
+        }
+      } catch (error) {
+        message.textContent = error.message;
+        if (error.status === 403) {
+          showView("verify");
+          document.querySelector("#verification-email").value = loginForm.elements.email.value;
+        }
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  }
+  for (const [form, endpoint] of [
+    [forgotForm, "/api/auth/password-reset"],
+    [resendVerificationForm, "/api/auth/verification-email"],
+    [verifyLinkForm, "/api/auth/verify"],
+    [resetPasswordForm, "/api/auth/password-reset/confirm"],
+  ]) {
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const submit = form.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      message.textContent = "";
+      try {
+        const values = Object.fromEntries(new FormData(form).entries());
+        const result = await api(endpoint, { method: "POST", body: JSON.stringify(values) });
+        if (endpoint.endsWith("/confirm") || endpoint.endsWith("/verify")) {
+          history.replaceState(null, "", "sign-in.html");
+          showView("login");
+        }
+        message.textContent = result.message;
       } catch (error) {
         message.textContent = error.message;
       } finally {

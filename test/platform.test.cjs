@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
 const { once } = require("node:events");
 const { createServer } = require("node:net");
+const { readFileSync } = require("node:fs");
 const { DatabaseSync } = require("node:sqlite");
 const { mkdtemp, rm } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
@@ -17,6 +18,7 @@ let temporaryDirectory;
 let baseUrl;
 let origin;
 let cookie;
+let startupOutput = "";
 
 async function unusedPort() {
   const listener = createServer();
@@ -37,6 +39,14 @@ async function request(path, { method = "GET", body, authenticated = false, requ
     headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
+}
+
+function developmentToken(purpose) {
+  const queryName = purpose === "verify_email" ? "verify" : "reset";
+  const pattern = new RegExp(`Development ${purpose} link: https?[^\\s]*[?&]${queryName}=([A-Za-z0-9_-]+)`, "g");
+  const tokens = [...startupOutput.matchAll(pattern)];
+  assert.ok(tokens.length > 0, `Server did not emit a development ${purpose} link:\n${startupOutput}`);
+  return tokens[tokens.length - 1][1];
 }
 
 after(async () => {
@@ -67,7 +77,7 @@ test("accounts, fundraiser management, and API access work end to end", { timeou
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  let startupOutput = "";
+  startupOutput = "";
   child.stdout.setEncoding("utf8").on("data", (chunk) => { startupOutput += chunk; });
   child.stderr.setEncoding("utf8").on("data", (chunk) => { startupOutput += chunk; });
   let ready = false;
@@ -112,9 +122,58 @@ test("accounts, fundraiser management, and API access work end to end", { timeou
     body: { name: "Test Organizer", email: "organizer@example.com", password: "A-long-test-password-123" },
   });
   assert.equal(registration.status, 201);
-  cookie = registration.headers.get("set-cookie").split(";")[0];
+  assert.match((await registration.json()).message, /verify your account/i);
+  assert.equal(registration.headers.get("set-cookie"), null);
+  const unverifiedLogin = await request("/api/auth/login", {
+    method: "POST",
+    body: { email: "organizer@example.com", password: "A-long-test-password-123" },
+  });
+  assert.equal(unverifiedLogin.status, 403);
+  const verificationToken = developmentToken("verify_email");
+  const verification = await request("/api/auth/verify", {
+    method: "POST",
+    body: { token: verificationToken },
+  });
+  assert.equal(verification.status, 200);
+  assert.equal((await verification.json()).message, "Your email is verified. You can now sign in.");
+  assert.equal((await request("/api/auth/verify", { method: "POST", body: { token: verificationToken } })).status, 400);
+
+  const registrationResend = await request("/api/auth/verification-email", {
+    method: "POST",
+    body: { email: "organizer@example.com" },
+  });
+  assert.equal(registrationResend.status, 202);
+  assert.match((await registrationResend.json()).message, /if your account needs verification/i);
+
+  const unknownPasswordReset = await request("/api/auth/password-reset", {
+    method: "POST",
+    body: { email: "nobody@example.com" },
+  });
+  assert.equal(unknownPasswordReset.status, 202);
+  const passwordResetRequest = await request("/api/auth/password-reset", {
+    method: "POST",
+    body: { email: "organizer@example.com" },
+  });
+  assert.equal(passwordResetRequest.status, 202);
+  assert.equal((await passwordResetRequest.json()).message, (await unknownPasswordReset.clone().json()).message);
+
+  const resetToken = developmentToken("password_reset");
+  const invalidPasswordReset = await request("/api/auth/password-reset/confirm", {
+    method: "POST",
+    body: { token: resetToken, password: "short" },
+  });
+  assert.equal(invalidPasswordReset.status, 400);
+
+  const login = await request("/api/auth/login", {
+    method: "POST",
+    body: { email: "organizer@example.com", password: "A-long-test-password-123" },
+  });
+  assert.equal(login.status, 200);
+  cookie = login.headers.get("set-cookie").split(";")[0];
   assert.ok(cookie.startsWith("goodroot_session="));
-  assert.equal((await (await request("/api/auth/me", { authenticated: true })).json()).user.email, "organizer@example.com");
+  const currentUser = (await (await request("/api/auth/me", { authenticated: true })).json()).user;
+  assert.equal(currentUser.email, "organizer@example.com");
+  assert.equal(currentUser.emailVerified, true);
 
   const uploaded = await request("/api/uploads/images", {
     method: "POST",
@@ -289,12 +348,33 @@ test("accounts, fundraiser management, and API access work end to end", { timeou
   assert.equal(logout.status, 200);
   assert.equal((await (await request("/api/auth/me")).json()).user, null);
 
-  const login = await request("/api/auth/login", {
+  const logoutLogin = await request("/api/auth/login", {
     method: "POST",
     body: { email: "organizer@example.com", password: "A-long-test-password-123" },
   });
-  assert.equal(login.status, 200);
-  cookie = login.headers.get("set-cookie").split(";")[0];
+  assert.equal(logoutLogin.status, 200);
+  cookie = logoutLogin.headers.get("set-cookie").split(";")[0];
+
+  const resetWithSession = await request("/api/auth/password-reset/confirm", {
+    method: "POST",
+    authenticated: true,
+    body: { token: resetToken, password: "An-even-better-password-456" },
+  });
+  assert.equal(resetWithSession.status, 200);
+  assert.equal((await (await request("/api/auth/me", { authenticated: true })).json()).user, null);
+  assert.equal((await request("/api/auth/login", {
+    method: "POST",
+    body: { email: "organizer@example.com", password: "A-long-test-password-123" },
+  })).status, 401);
+  const newPasswordLogin = await request("/api/auth/login", {
+    method: "POST",
+    body: { email: "organizer@example.com", password: "An-even-better-password-456" },
+  });
+  assert.equal(newPasswordLogin.status, 200);
+  assert.equal((await request("/api/auth/password-reset/confirm", {
+    method: "POST",
+    body: { token: resetToken, password: "Another-password-that-is-strong-789" },
+  })).status, 400);
 });
 
 test("live Stripe keys are rejected", () => {
@@ -313,4 +393,56 @@ test("live Stripe keys are rejected", () => {
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Live Stripe keys are deliberately disabled/);
+});
+
+test("account-security migration preserves existing accounts", () => {
+  const legacyDatabasePath = join(temporaryDirectory, "legacy.sqlite");
+  const legacyDatabase = new DatabaseSync(legacyDatabasePath);
+  legacyDatabase.exec(readFileSync(join(process.cwd(), "src/migrations/001_core.sql"), "utf8"));
+  legacyDatabase.exec(readFileSync(join(process.cwd(), "src/migrations/002_campaign_creation.sql"), "utf8"));
+  legacyDatabase.exec("CREATE TABLE schema_migrations (id TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+  legacyDatabase.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+    .run("001_core.sql", new Date().toISOString());
+  legacyDatabase.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)")
+    .run("002_campaign_creation.sql", new Date().toISOString());
+  legacyDatabase.prepare(`
+    INSERT INTO users (id, email, name, password_salt, password_hash, created_at)
+    VALUES ('legacy-user', 'legacy@example.com', 'Legacy Organizer', 'salt', 'hash', ?)
+  `).run(new Date().toISOString());
+  legacyDatabase.close();
+
+  const migration = spawnSync(process.execPath, ["--input-type=module", "-e", "import('./dist/src/database.js')"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: { ...process.env, DATABASE_PATH: legacyDatabasePath },
+  });
+  assert.equal(migration.status, 0, `${migration.stdout}\n${migration.stderr}`);
+
+  const upgradedDatabase = new DatabaseSync(legacyDatabasePath);
+  const user = upgradedDatabase.prepare("SELECT email_verified FROM users WHERE id = 'legacy-user'").get();
+  assert.equal(user.email_verified, 1);
+  const authTokens = upgradedDatabase.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'auth_tokens'").get();
+  assert.ok(authTokens);
+  upgradedDatabase.close();
+});
+
+test("production refuses to start without account email delivery", () => {
+  const result = spawnSync(process.execPath, ["--env-file-if-exists=.env", "dist/src/server.js"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      PORT: "4173",
+      APP_URL: "https://goodroot.example",
+      DATABASE_PATH: join(temporaryDirectory, "production-email.sqlite"),
+      SESSION_SECRET: "production-test-session-secret-with-more-than-32-characters",
+      RESEND_API_KEY: "",
+      EMAIL_FROM: "",
+      STRIPE_SECRET_KEY: "",
+      STRIPE_WEBHOOK_SECRET: "",
+    },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /RESEND_API_KEY and EMAIL_FROM are required in production/);
 });

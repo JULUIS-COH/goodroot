@@ -6,6 +6,7 @@ Goodroot is an original, multi-page crowdfunding application for a US / USD laun
 
 - Node.js 24 or later (uses Node's built-in SQLite module)
 - npm
+- A Resend account and verified sending domain for production verification and password-reset emails
 - A Stripe account in test mode to exercise organizer onboarding and checkout
 
 ## Local development
@@ -26,6 +27,12 @@ Without Stripe keys, accounts, fundraisers, drafts, uploads, and organizer updat
 4. Open that fundraiser and use Stripe's published test card numbers in Checkout. Never use live keys or real card details with this app.
 
 `PLATFORM_FEE_BPS` defaults to `0`. It can be set from `0` to `1000` basis points for test-mode destination charges.
+
+## Account security and email
+
+New accounts must verify their email before signing in. Verification links expire after 24 hours; password-reset links expire after one hour. Reset tokens are stored hashed and single-use, and changing a password revokes the account's existing sessions. Reset requests use a generic response so the endpoint does not reveal whether an email has an account.
+
+For local development without an email provider, verification and reset links are printed to the server console. For production, configure both `RESEND_API_KEY` and `EMAIL_FROM` in `.env`, using a sender address on a domain verified with Resend. The server refuses to start in production unless both are configured. Never commit the Resend API key.
 
 ## Fundraiser workflow
 
@@ -64,7 +71,7 @@ CI runs the TypeScript build and integration tests, checks production dependenci
 
 ## Implemented
 
-- Registration, login, logout, password hashing, and server-side expiring sessions.
+- Email verification and resend, login/logout, password hashing, single-use password recovery, and revocable server-side sessions.
 - Searchable fundraiser listings, categories, story pages, campaign updates, and related campaigns.
 - Authenticated fundraiser creation, image upload, private drafts, publishing, editing, and dashboard summaries.
 - Stripe Connect Express onboarding and Checkout destination charges in test mode only.
@@ -73,6 +80,6 @@ CI runs the TypeScript build and integration tests, checks production dependenci
 
 ## Before any real-money launch
 
-This application is **not ready to process live donations**. Live Stripe keys are explicitly rejected. A real launch still needs legal and tax review for the fundraising model, email verification and account recovery, robust abuse/fraud controls, moderation and reporting, privacy and retention policies, monitoring and tested backups, and end-to-end testing against an approved production payment configuration. Contributions count only after a signed, verified Stripe webhook.
+This application is **not ready to process live donations**. Live Stripe keys are explicitly rejected. A real launch still needs legal and tax review for the fundraising model, stronger abuse/fraud controls, moderation and reporting, privacy and retention policies, monitoring and tested backups, and end-to-end testing against an approved production payment configuration. Contributions count only after a signed, verified Stripe webhook.
 
 Sample fundraiser totals are illustrative display data, not verified payment history. SQLite is appropriate for local development and a single application process, not horizontally scaled production traffic. The Docker configuration is a deployable baseline, not a substitute for production operations, security, and compliance review.
