@@ -386,6 +386,7 @@ async function serveStatic(pathname: string, response: ServerResponse): Promise<
     "/sign-in.html",
     "/how-it-works.html",
     "/styles.css",
+    "/site.js",
     "/app.js",
     "/pages.js",
   ]);

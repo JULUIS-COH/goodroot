@@ -80,14 +80,4 @@ document.querySelector('[data-action="clear-filters"]')?.addEventListener("click
   document.querySelectorAll(".category-pill").forEach((pill) => pill.classList.toggle("selected", pill.dataset.category === selectedCategory));
   loadCampaigns();
 });
-document.querySelectorAll(".main-nav a").forEach((link) => {
-  if (link.href.endsWith("#how-it-works")) link.href = "how-it-works.html";
-  if (link.href.endsWith("#discover")) link.href = "explore.html";
-});
-document.querySelector("#current-year").textContent = String(new Date().getFullYear());
-document.querySelector(".menu-toggle").addEventListener("click", (event) => {
-  const header = document.querySelector(".site-header");
-  const expanded = header.classList.toggle("menu-open");
-  event.currentTarget.setAttribute("aria-expanded", String(expanded));
-});
 loadCampaigns();

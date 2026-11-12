@@ -73,20 +73,6 @@ function campaignCard(campaign, { owner = false } = {}) {
   </article>`;
 }
 
-function setupMobileNavigation() {
-  const toggle = document.querySelector(".menu-toggle");
-  if (!toggle) return;
-  toggle.addEventListener("click", () => {
-    const header = document.querySelector(".site-header");
-    const expanded = header.classList.toggle("menu-open");
-    toggle.setAttribute("aria-expanded", String(expanded));
-  });
-  document.querySelectorAll(".main-nav a").forEach((link) => link.addEventListener("click", () => {
-    document.querySelector(".site-header").classList.remove("menu-open");
-    toggle.setAttribute("aria-expanded", "false");
-  }));
-}
-
 function renderExplore() {
   const grid = document.querySelector("#page-campaign-grid");
   const search = document.querySelector("#page-search");
@@ -398,7 +384,6 @@ async function renderStart() {
       location.replace(`sign-in.html?next=${encodeURIComponent("start.html")}`);
       return;
     }
-    setupSignOut();
     const organizer = document.querySelector("#create-organizer");
     if (organizer && !organizer.value) organizer.value = user.name;
   } catch (error) {
@@ -589,7 +574,6 @@ async function renderDashboard() {
       location.replace(`sign-in.html?next=${encodeURIComponent("dashboard.html")}`);
       return;
     }
-    setupSignOut();
     const { campaigns } = await api("/api/me/campaigns");
     const raised = campaigns.reduce((total, campaign) => total + Number(campaign.raised), 0);
     const supporters = campaigns.reduce((total, campaign) => total + Number(campaign.supporters), 0);
@@ -615,23 +599,6 @@ async function renderDashboard() {
     status.textContent = error.message;
     if (error.status === 401) location.replace(`sign-in.html?next=${encodeURIComponent("dashboard.html")}`);
   }
-}
-
-function setupSignOut() {
-  const signInLink = document.querySelector(".header-actions .text-button");
-  if (!signInLink || signInLink.dataset.signOutReady) return;
-  signInLink.textContent = "Sign out";
-  signInLink.href = "#sign-out";
-  signInLink.dataset.signOutReady = "true";
-  signInLink.addEventListener("click", async (event) => {
-    event.preventDefault();
-    try {
-      await api("/api/auth/logout", { method: "POST", body: "{}" });
-      location.assign("index.html");
-    } catch (error) {
-      showToast(error.message);
-    }
-  });
 }
 
 document.addEventListener("click", async (event) => {
@@ -695,8 +662,6 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-document.querySelectorAll(".current-year").forEach((node) => { node.textContent = String(new Date().getFullYear()); });
-setupMobileNavigation();
 switch (document.body.dataset.page) {
   case "explore": renderExplore(); break;
   case "campaign": renderCampaign(); break;
